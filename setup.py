@@ -18,7 +18,7 @@ with open('README.rst') as fd:
 
 setup(
     name='redis-lru',
-    version='0.0.2',
+    version='0.0.3',
     description=description,
     long_description=long_description,
     author='Leo Howell',
