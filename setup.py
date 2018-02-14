@@ -16,9 +16,12 @@ description = (
 with open('README.rst') as fd:
     long_description = fd.read()
 
+with open('CHANGES.txt') as fd:
+    long_description = '{}\n\n{}'.format(long_description, fd.read())
+
 setup(
     name='redis-lru',
-    version='0.0.3',
+    version='0.0.4',
     description=description,
     long_description=long_description,
     author='Leo Howell',

@@ -21,13 +21,13 @@ For the most part, you can just use it like this:
 
 .. code-block:: python
 
-    from redis_lru import redis_lru_cache_function
+    from redis_lru import redis_lru_cache
 
     client = redis.StrictRedis()
 
-    @redis_lru_cache_function(max_size=1024, expiration=15*60, node=client)
+    @redis_lru_cache(max_size=1024, expiration=15*60, node=client)
     def f(x):
-        print("Calling f({})".format(str(x)))
+        print("Calling f({})".format(x))
         return x
 
 
@@ -43,7 +43,7 @@ One can also create an `RedisLRUCacheDict` object, which have a redis backend be
 
     client = redis.StrictRedis()
 
-    d = RedisLRUCacheDict('unique_key', max_size=3, expiration=3, node=client)
+    d = RedisLRUCacheDict(max_size=3, expiration=3, node=client)
 
     d['foo'] = 'bar'
     print(d['foo']) # prints "bar"
@@ -59,7 +59,7 @@ In order to configure the decorator in a more detailed manner, or share a cache 
 
     d = RedisLRUCacheDict(max_size=3, expiration=3, node=client)
 
-    @redis_lru_cache_function(cache=d)
+    @redis_lru_cache(cache=d)
     def f(x):
         return x/2
 

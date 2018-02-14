@@ -1,0 +1,7 @@
+0.0.4
+=====
+- Generate `unique_key` automatically so your may never get touch this argument.
+- Improved exception processing, now you won't receive any exception by default.
+- Added unittest for `redis_lru_cache` decorator and `RedisLRUCacheDict`
+- Added more type of cache usage statistic type like `POP`, `DEL` etc.
+- Added changes log.
