@@ -15,12 +15,12 @@ from contextlib import contextmanager
 import redis
 
 
+STAT_KEY_EXPIRATION = 30 * 24 * 60 * 60  # 30 days
 NAMESPACE_DELIMITER = b':'
 PREFIX_DELIMITER = NAMESPACE_DELIMITER * 2
 
 
 logger = logging.getLogger(__name__)
-
 
 
 def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
@@ -124,36 +124,29 @@ class RedisLRUCacheDict:
     KeyError: 'a'
     """
 
-    EXPIRATION_STAT_KEY = 30 * 86400  # 30 day
-
-    HIT = 'HIT'
-    MISS = 'MISS'
-    POP = 'POP'
-    SET = 'SET'
-    DEL = 'DEL'
-
     ONCE_CLEAN_RATIO = 0.1
 
     def __init__(self, unique_key=None, max_size=1024, expiration=15*60,
                  client=None, clear_stat=False):
 
-        if isinstance(unique_key, str):
-            unique_key = unique_key.encode()
-
         if unique_key is not None:
+            if isinstance(unique_key, str):
+                unique_key = unique_key.encode()
+
             if PREFIX_DELIMITER in unique_key:
                 raise ValueError('Invalid unique key: {}'.format(unique_key))
             self.unique_key = unique_key
+
         else:
-            self.unique_key = uuid.uuid4().bytes
+            self.unique_key = unique_key = uuid.uuid4().bytes
             logger.debug('Generated `unique key`: {}'.format(self.unique_key))
 
         self.max_size = max_size
         self.expiration = expiration
         self.client = client or redis.StrictRedis()
 
-        self.access_key = 'lru-access:{}'.format(self.unique_key)  # sorted set
-        self.stat_key = 'lru-stat:{}'.format(self.unique_key)      # hash set
+        self.access_key = b'lru-access:{}' + unique_key  # sorted set
+        self.stat_key = b'lru-stat:{}' + unique_key      # hash set
 
         self.once_clean_size = int(self.max_size * self.ONCE_CLEAN_RATIO)
 
@@ -163,10 +156,6 @@ class RedisLRUCacheDict:
     def report_usage(self):
         return self.client.hgetall(self.stat_key)
 
-    @property
-    def size(self):
-        return self.client.zcard(self.access_key)
-
     @joint_key
     def get(self, key, default=None):
         try:
@@ -174,23 +163,16 @@ class RedisLRUCacheDict:
         except KeyError:
             return default
 
-    def _ensure_room(self):
-        if self.size < self.max_size:
-            return True
-
-        keys = self.client.zrange(self.access_key, 0, self.once_clean_size)
-
-        with redis_pipeline(self.client) as p:
-            for k in keys:
-                p.delete(k)
-                p.zrem(self.access_key, k)
-            p.hincrby(self.stat_key, self.POP, len(keys))
-
-        return False
-
     @joint_key
     def __setitem__(self, key, value):
-        self._ensure_room()
+        if self.client.zcard(self.access_key) >= self.max_size:
+            keys = self.client.zrange(self.access_key, 0, self.once_clean_size)
+            with redis_pipeline(self.client) as p:
+                for k in keys:
+                    p.delete(k)
+                    p.zrem(self.access_key, k)
+                p.hincrby(self.stat_key, 'POP', len(keys))
+
         value = json.dumps(value)
 
         with redis_pipeline(self.client) as p:
@@ -199,27 +181,27 @@ class RedisLRUCacheDict:
             p.zadd(self.access_key, time.time(), key)
             p.expire(self.access_key, self.expiration)
 
-            p.hincrby(self.stat_key, self.SET, 1)
-            p.expire(self.stat_key, self.EXPIRATION_STAT_KEY)
+            p.hincrby(self.stat_key, 'SET', 1)
+            p.expire(self.stat_key, STAT_KEY_EXPIRATION)
 
     @joint_key
     def __delitem__(self, key):
         with redis_pipeline(self.client) as p:
             p.delete(key)
+
             p.zrem(self.access_key, key)
             p.expire(self.access_key, self.expiration)
 
-            p.hincrby(self.stat_key, self.DEL, 1)
-            p.expire(self.stat_key, self.EXPIRATION_STAT_KEY)
+            p.hincrby(self.stat_key, 'DEL', 1)
+            p.expire(self.stat_key, STAT_KEY_EXPIRATION)
 
     @joint_key
     def __getitem__(self, key):
         value = self.client.get(key)
         if value is None:
             with redis_pipeline(self.client) as p:
-                p.hincrby(self.stat_key, self.MISS, 1)
-                p.expire(self.stat_key, self.EXPIRATION_STAT_KEY)
-                p.execute()
+                p.hincrby(self.stat_key, 'MISS', 1)
+                p.expire(self.stat_key, STAT_KEY_EXPIRATION)
 
             real_key = key.split(PREFIX_DELIMITER, 1)[1]
             raise KeyError(real_key.decode())
@@ -230,8 +212,8 @@ class RedisLRUCacheDict:
                 p.zadd(self.access_key, time.time(), key)
                 p.expire(self.access_key, self.expiration)
 
-                p.hincrby(self.stat_key, self.HIT, 1)
-                p.expire(self.stat_key, self.EXPIRATION_STAT_KEY)
+                p.hincrby(self.stat_key, 'HIT', 1)
+                p.expire(self.stat_key, STAT_KEY_EXPIRATION)
 
             return value
 
