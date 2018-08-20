@@ -53,12 +53,12 @@ def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
 
     def wrapper(func):
         if cache is None:
-            unique_key = NAMESPACE_DELIMITER.join(
+            key_prefix = NAMESPACE_DELIMITER.join(
                 x.encode().replace(b'.', NAMESPACE_DELIMITER)
                 for x in (func.__module__, func.__qualname__)
             )
             lru_cache = RedisLRUCacheDict(
-                unique_key=unique_key, max_size=max_size, expiration=expiration,
+                key_prefix=key_prefix, max_size=max_size, expiration=expiration,
                 client=client, eviction_size=eviction_size
             )
         else:
@@ -90,8 +90,7 @@ def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
 def joint_key(method):
     @wraps(method)
     def wrapper(self, key, *args, **kwargs):
-        key = b'lru-value:' + self.unique_key + PREFIX_DELIMITER + key.encode()
-        return method(self, key, *args, **kwargs)
+        return method(self, self.value_key_prefix + key.encode(), *args, **kwargs)
     return wrapper
 
 
@@ -125,27 +124,29 @@ class RedisLRUCacheDict:
     KeyError: 'a'
     """
 
-    def __init__(self, unique_key=None, max_size=1024, expiration=15*60,
+    def __init__(self, key_prefix=None, max_size=1024, expiration=15 * 60,
                  client=None, clear_stat=False, eviction_size=None):
 
-        if unique_key is not None:
-            if isinstance(unique_key, str):
-                unique_key = unique_key.encode()
+        if key_prefix is not None:
+            if isinstance(key_prefix, str):
+                key_prefix = key_prefix.encode()
 
-            if PREFIX_DELIMITER in unique_key:
-                raise ValueError('Invalid unique key: {}'.format(unique_key))
-            self.unique_key = unique_key
+            if PREFIX_DELIMITER in key_prefix:
+                raise ValueError('Invalid unique key: {}'.format(key_prefix))
 
         else:
-            self.unique_key = unique_key = uuid.uuid4().bytes
-            logger.debug('Generated `unique key`: {}'.format(self.unique_key))
+            key_prefix = uuid.uuid4().bytes
+            logger.debug('Generated `unique key`: {}'.format(key_prefix))
 
+        self.value_key_prefix = (
+                b'lru-value' + NAMESPACE_DELIMITER + key_prefix + PREFIX_DELIMITER
+        )
         self.max_size = max_size
         self.expiration = expiration
         self.client = client or redis.StrictRedis()
 
-        self.access_key = b'lru-access:{}' + unique_key  # sorted set
-        self.stat_key = b'lru-stat:{}' + unique_key      # hash set
+        self.access_key = b'lru-access:' + key_prefix  # sorted set
+        self.stat_key = b'lru-stat:' + key_prefix      # hash set
 
         if eviction_size is None:
             self.eviction_range = int(self.max_size * 0.1)
