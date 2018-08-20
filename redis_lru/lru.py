@@ -131,8 +131,6 @@ class RedisLRUCacheDict:
     POP = 'POP'
     SET = 'SET'
     DEL = 'DEL'
-    DUMPS_ERROR = 'DUMPS_ERROR'
-    LOADS_ERROR = 'LOADS_ERROR'
 
     ONCE_CLEAN_RATIO = 0.1
 
@@ -192,15 +190,8 @@ class RedisLRUCacheDict:
 
     @joint_key
     def __setitem__(self, key, value):
-        try:
-            value = json.dumps(value)
-        except Exception:  # here too broad exception clause, just ignore it
-            with redis_pipeline(self.client) as p:
-                p.hincrby(self.stat_key, self.DUMPS_ERROR, 1)
-                p.expire(self.stat_key, self.EXPIRATION_STAT_KEY)
-            return
-
         self._ensure_room()
+        value = json.dumps(value)
 
         with redis_pipeline(self.client) as p:
             p.setex(key, self.expiration, value)
@@ -233,14 +224,7 @@ class RedisLRUCacheDict:
             real_key = key.split(PREFIX_DELIMITER, 1)[1]
             raise KeyError(real_key.decode())
         else:
-            try:
-                value = json.loads(value)
-            except Exception:
-                with redis_pipeline(self.client) as p:
-                    p.delete(key)
-                    p.hincrby(self.stat_key, self.LOADS_ERROR, 1)
-                    p.expire(self.stat_key, self.EXPIRATION_STAT_KEY)
-                raise KeyError(key)
+            value = json.loads(value)
 
             with redis_pipeline(self.client) as p:
                 p.zadd(self.access_key, time.time(), key)
