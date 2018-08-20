@@ -156,8 +156,13 @@ class RedisLRUCacheDict:
         if clear_stat:
             self.client.delete(self.stat_key)
 
-    def report_usage(self):
-        return self.client.hgetall(self.stat_key)
+    @property
+    def info(self):
+        result = {'MAX_SIZE': self.max_size}
+        with redis_pipeline(self.client) as p:
+            result.update(p.hgetall(self.stat_key))
+            result['SIZE'] = self.client.zcard(self.access_key)
+        return result
 
     @joint_key
     def get(self, key, default=None):
