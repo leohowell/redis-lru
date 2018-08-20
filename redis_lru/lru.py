@@ -168,9 +168,8 @@ class RedisLRUCacheDict:
         if self.client.zcard(self.access_key) >= self.max_size:
             keys = self.client.zrange(self.access_key, 0, self.once_clean_size)
             with redis_pipeline(self.client) as p:
-                for k in keys:
-                    p.delete(k)
-                    p.zrem(self.access_key, k)
+                p.delete(*keys)
+                p.zrem(self.access_key, *keys)
                 p.hincrby(self.stat_key, 'POP', len(keys))
 
         value = json.dumps(value)
