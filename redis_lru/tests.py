@@ -8,8 +8,6 @@
 import time
 import unittest
 
-import requests
-
 from redis_lru import redis_lru_cache, RedisLRUCacheDict
 
 
@@ -23,11 +21,7 @@ class RedisLRUCacheDecoratorTestCase(unittest.TestCase):
         self.test_cache_working_flag += 1
         self.test_expire_working_flag += 1
 
-        print('send request...')
-        resp = requests.head('https://pypi.python.org/pypi/redis-lru/')
-        print('receive response done.')
-
-        return {'content_type': resp.headers.get('Content-Type')}
+        return {'content_type': 'text/html; charset=UTF-8'}
 
     def test_cache_working(self):
         content_type1 = self.foo()
