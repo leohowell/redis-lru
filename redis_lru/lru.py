@@ -173,7 +173,6 @@ class RedisLRUCacheDict:
             with redis_pipeline(self.client) as p:
                 p.delete(*keys)
                 p.zrem(self.access_key, *keys)
-                p.hincrby(self.stat_key, 'POP', len(keys))
 
         value = json.dumps(value)
 
@@ -183,9 +182,6 @@ class RedisLRUCacheDict:
             p.zadd(self.access_key, time.time(), key)
             p.expire(self.access_key, self.expiration)
 
-            p.hincrby(self.stat_key, 'SET', 1)
-            p.expire(self.stat_key, STAT_KEY_EXPIRATION)
-
     @joint_key
     def __delitem__(self, key):
         with redis_pipeline(self.client) as p:
@@ -194,12 +190,11 @@ class RedisLRUCacheDict:
             p.zrem(self.access_key, key)
             p.expire(self.access_key, self.expiration)
 
-            p.hincrby(self.stat_key, 'DEL', 1)
-            p.expire(self.stat_key, STAT_KEY_EXPIRATION)
-
     @joint_key
     def __getitem__(self, key):
+
         value = self.client.get(key)
+
         if value is None:
             with redis_pipeline(self.client) as p:
                 p.hincrby(self.stat_key, 'MISS', 1)
@@ -207,6 +202,7 @@ class RedisLRUCacheDict:
 
             real_key = key.split(PREFIX_DELIMITER, 1)[1]
             raise KeyError(real_key.decode())
+
         else:
             value = json.loads(value)
 
