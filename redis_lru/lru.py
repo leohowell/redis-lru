@@ -219,7 +219,7 @@ class RedisLRUCacheDict:
 
     @joint_key
     def __contains__(self, key):
-        return bool(self.client.exist(key))
+        return bool(self.client.exists(key))
 
 
 if __name__ == "__main__":
