@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
-                    cache=None, typed_hash_args=False):
+                    cache=None, eviction_size=None, typed_hash_args=False):
     """
     >>> @redis_lru_cache(20, 1)
     ... def f(x):
@@ -58,7 +58,8 @@ def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
                 for x in (func.__module__, func.__qualname__)
             )
             lru_cache = RedisLRUCacheDict(
-                unique_key, max_size, expiration, client
+                unique_key=unique_key, max_size=max_size, expiration=expiration,
+                client=client, eviction_size=eviction_size
             )
         else:
             lru_cache = cache
@@ -124,10 +125,8 @@ class RedisLRUCacheDict:
     KeyError: 'a'
     """
 
-    ONCE_CLEAN_RATIO = 0.1
-
     def __init__(self, unique_key=None, max_size=1024, expiration=15*60,
-                 client=None, clear_stat=False):
+                 client=None, clear_stat=False, eviction_size=None):
 
         if unique_key is not None:
             if isinstance(unique_key, str):
@@ -148,7 +147,10 @@ class RedisLRUCacheDict:
         self.access_key = b'lru-access:{}' + unique_key  # sorted set
         self.stat_key = b'lru-stat:{}' + unique_key      # hash set
 
-        self.once_clean_size = int(self.max_size * self.ONCE_CLEAN_RATIO)
+        if eviction_size is None:
+            self.eviction_range = int(self.max_size * 0.1)
+        else:
+            self.eviction_range = eviction_size - 1
 
         if clear_stat:
             self.client.delete(self.stat_key)
@@ -166,7 +168,7 @@ class RedisLRUCacheDict:
     @joint_key
     def __setitem__(self, key, value):
         if self.client.zcard(self.access_key) >= self.max_size:
-            keys = self.client.zrange(self.access_key, 0, self.once_clean_size)
+            keys = self.client.zrange(self.access_key, 0, self.eviction_range)
             with redis_pipeline(self.client) as p:
                 p.delete(*keys)
                 p.zrem(self.access_key, *keys)
