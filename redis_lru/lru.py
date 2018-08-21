@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
-                    cache=None, eviction_size=None, typed_hash_args=False):
+                    cache=None, eviction_size=None, typed_hash_args=False,
+                    encode_obj=None, decode_obj=None):
     """
     >>> @redis_lru_cache(20, 1)
     ... def f(x):
@@ -59,7 +60,8 @@ def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
             )
             lru_cache = RedisLRUCacheDict(
                 key_prefix=key_prefix, max_size=max_size, expiration=expiration,
-                client=client, eviction_size=eviction_size
+                client=client, eviction_size=eviction_size, encode_obj=encode_obj,
+                decode_obj=decode_obj
             )
         else:
             lru_cache = cache
@@ -125,7 +127,8 @@ class RedisLRUCacheDict:
     """
 
     def __init__(self, key_prefix=None, max_size=1024, expiration=15 * 60,
-                 client=None, clear_stat=False, eviction_size=None):
+                 client=None, clear_stat=False, eviction_size=None, encode_obj=None,
+                 decode_obj=None):
 
         if key_prefix is not None:
             if isinstance(key_prefix, str):
@@ -147,6 +150,9 @@ class RedisLRUCacheDict:
 
         self.access_key = b'lru-access:' + key_prefix  # sorted set
         self.stat_key = b'lru-stat:' + key_prefix      # hash set
+
+        self.encode_obj = encode_obj
+        self.decode_obj = decode_obj
 
         if eviction_size is None:
             self.eviction_range = int(self.max_size * 0.1)
@@ -179,7 +185,7 @@ class RedisLRUCacheDict:
                 p.delete(*keys)
                 p.zrem(self.access_key, *keys)
 
-        value = json.dumps(value)
+        value = json.dumps(value, default=self.encode_obj, separators=(',', ':'))
 
         with redis_pipeline(self.client) as p:
             p.setex(key, self.expiration, value)
@@ -209,7 +215,7 @@ class RedisLRUCacheDict:
             raise KeyError(real_key.decode())
 
         else:
-            value = json.loads(value)
+            value = json.loads(value, object_hook=self.decode_obj)
 
             with redis_pipeline(self.client) as p:
                 p.zadd(self.access_key, time.time(), key)
