@@ -212,7 +212,10 @@ class RedisLRUCacheDict(object):
             raise KeyError(real_key)
         else:
             try:
-                value = json.loads(value)
+                if type(value) is bytes:
+                    value = json.loads(value.decode('utf-8'))
+                else:
+                    value = json.loads(value)
             except Exception:
                 with redis_pipeline(self.node) as p:
                     p.delete(key)
