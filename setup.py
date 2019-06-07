@@ -5,6 +5,7 @@
 @date: 2018/2/12
 """
 
+import setuptools
 from distutils.core import setup
 
 description = (
@@ -20,16 +21,17 @@ with open('CHANGES.txt') as fd:
 
 setup(
     name='redis-lru',
-    version='0.0.4',
+    version='0.1.0',
     description=description,
     long_description=long_description,
+    long_description_content_type='text/x-rst',
     author='Leo Howell',
     author_email='leohowell.com@gmail.com',
     license='BSD',
     url='https://github.com/leohowell/redis-lru',
     packages=['redis_lru'],
     install_requires=['redis'],
-    python_requires='>=3.5',
+    python_requires='>=3.4',
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',

@@ -2,236 +2,145 @@
 
 """
 @author: leohowell
-@date: 2018/2/11
+@date: 2018-12-31
 """
 
-import json
 import time
-import logging
-import uuid
+import types
+import atexit
+import pickle
 from functools import wraps
-from contextlib import contextmanager
 
 import redis
 
 
-STAT_KEY_EXPIRATION = 30 * 24 * 60 * 60  # 30 days
-NAMESPACE_DELIMITER = b':'
-PREFIX_DELIMITER = NAMESPACE_DELIMITER * 2
+class ArgsUnhashable(Exception):
+    pass
 
 
-logger = logging.getLogger(__name__)
+class RedisLRU:
+    def __init__(self,
+                 client: redis.StrictRedis,
+                 max_size=2 ** 20,
+                 default_ttl=15 * 60,
+                 key_prefix='RedisLRU',
+                 clear_on_exit=False):
+        self.client = client
+        self.max_size = max_size
+        self.key_prefix = key_prefix
+        self.default_ttl = default_ttl
 
+        if clear_on_exit:
+            atexit.register(self.clear_all_cache)
 
-def redis_lru_cache(max_size=1024, expiration=15 * 60, client=None,
-                    cache=None, eviction_size=None, typed_hash_args=False,
-                    encode_obj=None, decode_obj=None):
-    """
-    >>> @redis_lru_cache(20, 1)
-    ... def f(x):
-    ...    print("Calling f(" + str(x) + ")")
-    ...    return x
-    >>> f(3)
-    Calling f(3)
-    3
-    >>> f(3)
-    3
-    """
+    def __call__(self, ttl=60 * 15):
+        func = None
 
-    def _hash_args(args, kwargs):
-        return hash(
-            (hash(args),
-             hash(frozenset(kwargs.items()))
-             )
-        )
-
-    def _typed_hash_args(args, kwargs):
-        return hash((
-            _hash_args(args, kwargs),
-            hash(type(x) for x in args),
-            hash(type(x) for x in kwargs.values()),
-        ))
-
-    def wrapper(func):
-        if cache is None:
-            key_prefix = NAMESPACE_DELIMITER.join(
-                x.encode().replace(b'.', NAMESPACE_DELIMITER)
-                for x in (func.__module__, func.__qualname__)
-            )
-            lru_cache = RedisLRUCacheDict(
-                key_prefix=key_prefix, max_size=max_size, expiration=expiration,
-                client=client, eviction_size=eviction_size, encode_obj=encode_obj,
-                decode_obj=decode_obj
-            )
-        else:
-            lru_cache = cache
-
-        _arg_hasher = _typed_hash_args if typed_hash_args else _hash_args
-
-        @wraps(func)
         def inner(*args, **kwargs):
             try:
-                key = hex(_arg_hasher(args, kwargs))
-            except TypeError:
-                raise RuntimeError(
-                    'All arguments to lru-cached functions must be hashable.'
-                )
+                key = self._decorator_key(func, *args, **kwargs)
+            except ArgsUnhashable:
+                return func(*args, **kwargs)
+            else:
+                try:
+                    return self[key]
+                except KeyError:
+                    result = func(*args, **kwargs)
+                    self.set(key, result, ttl)
+                    return result
 
-            try:
-                return lru_cache[key]
-            except KeyError:
-                value = func(*args, **kwargs)
-                lru_cache[key] = value
-                return value
+        # decorator without arguments
+        if callable(ttl):
+            func = ttl
+            ttl = 60 * 15
+            return wraps(func)(inner)
 
-        return inner
+        # decorator with arguments
+        def wrapper(f):
+            nonlocal func
+            func = f
+            return wraps(func)(inner)
 
-    return wrapper
+        return wrapper
 
+    def __setitem__(self, key, value):
+        self.set(key, value)
 
-def joint_key(method):
-    @wraps(method)
-    def wrapper(self, key, *args, **kwargs):
-        return method(self, self.value_key_prefix + key.encode(), *args, **kwargs)
-    return wrapper
-
-
-@contextmanager
-def redis_pipeline(client):
-    p = client.pipeline()
-    yield p
-    p.execute()
-
-
-class RedisLRUCacheDict:
-    """ A dictionary-like object, supporting LRU caching semantics.
-    >>> d = RedisLRUCacheDict('unique_key', max_size=3, expiration=1)
-    >>> d['foo'] = 'bar'
-    >>> x = d['foo']
-    >>> print(x)
-    bar
-    >>> import time
-    >>> time.sleep(1.1) # 1.1 seconds > 1 second cache expiry of d
-    >>> d['foo']
-    Traceback (most recent call last):
-        ...
-    KeyError: 'foo'
-    >>> d['a'] = 'A'
-    >>> d['b'] = 'B'
-    >>> d['c'] = 'C'
-    >>> d['d'] = 'D'
-    >>> d['a'] # Should return value error, since we exceeded the max cache size
-    Traceback (most recent call last):
-        ...
-    KeyError: 'a'
-    """
-
-    def __init__(self, key_prefix=None, max_size=1024, expiration=15 * 60,
-                 client=None, clear_stat=False, eviction_size=None, encode_obj=None,
-                 decode_obj=None):
-
-        if key_prefix is not None:
-            if isinstance(key_prefix, str):
-                key_prefix = key_prefix.encode()
-
-            if PREFIX_DELIMITER in key_prefix:
-                raise ValueError('Invalid unique key: {}'.format(key_prefix))
-
+    def __getitem__(self, key):
+        if not self.client.exists(key):
+            raise KeyError()
         else:
-            key_prefix = uuid.uuid4().bytes
-            logger.debug('Generated `unique key`: {}'.format(key_prefix))
+            result = self.client.get(key)
+            return pickle.loads(result)
 
-        self.value_key_prefix = (
-                b'lru-value' + NAMESPACE_DELIMITER + key_prefix + PREFIX_DELIMITER
-        )
-        self.max_size = max_size
-        self.expiration = expiration
-        self.client = client or redis.StrictRedis()
+    def set(self, key, value, ttl=None):
+        ttl = ttl or self.default_ttl
+        value = pickle.dumps(value)
+        return self.client.setex(key, ttl, value)
 
-        self.access_key = b'lru-access:' + key_prefix  # sorted set
-        self.stat_key = b'lru-stat:' + key_prefix      # hash set
-
-        self.encode_obj = encode_obj
-        self.decode_obj = decode_obj
-
-        if eviction_size is None:
-            self.eviction_range = int(self.max_size * 0.1)
-        else:
-            self.eviction_range = eviction_size - 1
-
-        if clear_stat:
-            self.client.delete(self.stat_key)
-
-    @property
-    def info(self):
-        result = {'MAX_SIZE': self.max_size}
-        with redis_pipeline(self.client) as p:
-            result.update(p.hgetall(self.stat_key))
-            result['SIZE'] = self.client.zcard(self.access_key)
-        return result
-
-    @joint_key
     def get(self, key, default=None):
+        """
+        Fetch a given key from the cache. If the key does not exist, return
+        default, which itself defaults to None.
+        """
+
         try:
             return self[key]
         except KeyError:
             return default
 
-    @joint_key
-    def __setitem__(self, key, value):
-        if self.client.zcard(self.access_key) >= self.max_size:
-            keys = self.client.zrange(self.access_key, 0, self.eviction_range)
-            with redis_pipeline(self.client) as p:
-                p.delete(*keys)
-                p.zrem(self.access_key, *keys)
+    def clear_all_cache(self):
+        def delete_keys(items):
+            pipeline = self.client.pipeline()
+            for item in items:
+                pipeline.delete(item)
+            pipeline.execute()
 
-        value = json.dumps(value, default=self.encode_obj, separators=(',', ':'))
-
-        with redis_pipeline(self.client) as p:
-            p.setex(key, self.expiration, value)
-
-            p.zadd(self.access_key, time.time(), key)
-            p.expire(self.access_key, self.expiration)
-
-    @joint_key
-    def __delitem__(self, key):
-        with redis_pipeline(self.client) as p:
-            p.delete(key)
-
-            p.zrem(self.access_key, key)
-            p.expire(self.access_key, self.expiration)
-
-    @joint_key
-    def __getitem__(self, key):
-
-        value = self.client.get(key)
-
-        if value is None:
-            with redis_pipeline(self.client) as p:
-                p.hincrby(self.stat_key, 'MISS', 1)
-                p.expire(self.stat_key, STAT_KEY_EXPIRATION)
-
-            real_key = key.split(PREFIX_DELIMITER, 1)[1]
-            raise KeyError(real_key.decode())
-
+        match = '{}*'.format(self.key_prefix)
+        keys = []
+        for key in self.client.scan_iter(match, count=100):
+            keys.append(key)
+            if len(keys) >= 100:
+                delete_keys(keys)
+                keys = []
+                time.sleep(0.01)
         else:
-            value = json.loads(value, object_hook=self.decode_obj)
+            delete_keys(keys)
 
-            with redis_pipeline(self.client) as p:
-                p.zadd(self.access_key, time.time(), key)
-                p.expire(self.access_key, self.expiration)
+    def _decorator_key(self, func: types.FunctionType, *args, **kwargs):
+        try:
+            for arg in args:
+                hash(arg)
+            for value in kwargs.values():
+                hash(value)
+        except TypeError:
+            raise ArgsUnhashable()
 
-                p.hincrby(self.stat_key, 'HIT', 1)
-                p.expire(self.stat_key, STAT_KEY_EXPIRATION)
-
-            return value
-
-    @joint_key
-    def __contains__(self, key):
-        return bool(self.client.exists(key))
+        return '{}:{}:{}{!r}:{!r}'.format(self.key_prefix, func.__module__,
+                                          func.__qualname__, args, kwargs)
 
 
-if __name__ == "__main__":
-    import doctest
 
-    doctest.testmod()
+
+# from diskcache import Cache
+# client = redis.StrictRedis()
+#
+# cache = RedisLRU(client, 0)
+#
+# cache['x'] = 10
+#
+#
+# @cache(ttl=10)
+# def foo(x):
+#     print('foo ', x)
+#     return x + 1
+#
+#
+# @cache
+# def bar():
+#     print('bar')
+#     pass
+#
+#
+# print(foo(1))
+# print(bar())

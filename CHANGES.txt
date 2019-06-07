@@ -1,3 +1,10 @@
+0.1.0
+=====
+- Refactor RedisLRU class for a clean and neat implement.
+- Stop supporting Python 2.
+- Fix bugs in test cases.
+- Added clean cache option at process exit.
+
 0.0.4
 =====
 - Generate `unique_key` automatically so your may never get touch this argument.
