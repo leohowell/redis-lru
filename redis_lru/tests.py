@@ -2,70 +2,64 @@
 
 """
 @author: leohowell
-@date: 2018/2/14
+@date: 2019-06-07
 """
 
-import time
 import unittest
 
-from redis_lru import redis_lru_cache, RedisLRUCacheDict
+import time
+import redis
+
+from lru import RedisLRU
 
 
-class RedisLRUCacheDecoratorTestCase(unittest.TestCase):
-    def setUp(self):
-        self.test_cache_working_flag = 0
-        self.test_expire_working_flag = 0
+class RedisLRUTest(unittest.TestCase):
+    @classmethod
+    def get_cache(cls):
+        client = redis.StrictRedis('127.0.0.1', 6379)
+        return RedisLRU(client, clear_on_exit=True)
 
-    @redis_lru_cache(max_size=3, expiration=2)
-    def foo(self):
-        self.test_cache_working_flag += 1
-        self.test_expire_working_flag += 1
+    def test_lru_cache(self):
+        cache = self.get_cache()
+        flag = 0
 
-        return {'content_type': 'text/html; charset=UTF-8'}
+        @cache
+        def foo(x, y=10):
+            nonlocal flag
+            flag += 1
+            return x + y
 
-    def test_cache_working(self):
-        content_type1 = self.foo()
-        content_type2 = self.foo()
-        self.assertEqual(content_type1, content_type2)
-        self.assertEqual(self.test_cache_working_flag, 1)
+        result1 = foo(10)
+        self.assertEqual(result1, 20)
+        self.assertEqual(flag, 1)
 
-    def test_expire_working(self):
-        content_type1 = self.foo()
-        content_type2 = self.foo()
-        time.sleep(2)
-        content_type3 = self.foo()
-        self.assertEqual(content_type1, content_type2)
-        self.assertEqual(content_type1, content_type3)
-        self.assertEqual(self.test_expire_working_flag, 2)
+        result2 = foo(10)
+        self.assertEqual(result2, 20)
+        self.assertEqual(flag, 1)
 
+    def test_ttl(self):
+        cache = self.get_cache()
 
-class RedisLRUCacheDictTestCase(unittest.TestCase):
-    def test_cache_dict_basic(self):
-        cache = RedisLRUCacheDict(max_size=3, expiration=2)
-        value = 'aaa'
-        cache['a'] = value
-        self.assertEqual(cache['a'], value)
+        flag = 0
 
-    def test_expire(self):
-        cache = RedisLRUCacheDict(max_size=3, expiration=2)
-        value = 'aaa'
-        cache['a'] = value
-        self.assertEqual(cache['a'], value)
-        time.sleep(2)
-        with self.assertRaises(KeyError):
-            print(cache['a'])
+        @cache(ttl=1)
+        def bar(x, y=10):
+            nonlocal flag
+            flag += 1
+            return x + y
 
-    def test_max_size(self):
-        cache = RedisLRUCacheDict(max_size=3, expiration=2)
-        cache['a'] = 'aaa'
-        cache['b'] = 'bbb'
-        cache['c'] = 'ccc'
-        cache['d'] = 'ddd'
-        self.assertEqual(cache['b'], 'bbb')
-        self.assertEqual(cache['c'], 'ccc')
-        self.assertEqual(cache['d'], 'ddd')
-        with self.assertRaises(KeyError):
-            print(cache['a'])
+        result1 = bar(10)
+        self.assertEqual(result1, 20)
+        self.assertEqual(flag, 1)
+
+        result2 = bar(10)
+        self.assertEqual(result2, 20)
+        self.assertEqual(flag, 1)
+
+        time.sleep(1.1)
+        result3 = bar(10)
+        self.assertEqual(result3, 20)
+        self.assertEqual(flag, 2)
 
 
 if __name__ == '__main__':
