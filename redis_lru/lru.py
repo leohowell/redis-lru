@@ -25,12 +25,12 @@ class RedisLRU:
                  default_ttl=15 * 60,
                  key_prefix='RedisLRU',
                  clear_on_exit=False,
-                 exceptions=None):
+                 exclude_values=None):
         self.client = client
         self.max_size = max_size
         self.key_prefix = key_prefix
         self.default_ttl = default_ttl
-        self.exceptions = exceptions if type(exceptions) is list else list()
+        self.exclude_values = exclude_values if type(exclude_values) is set else set()
 
         if clear_on_exit:
             atexit.register(self.clear_all_cache)
@@ -76,7 +76,7 @@ class RedisLRU:
             return pickle.loads(result)
 
     def set(self, key, value, ttl=None):
-        if value in self.exceptions:
+        if value in self.exclude_values:
             return
         ttl = ttl or self.default_ttl
         value = pickle.dumps(value)

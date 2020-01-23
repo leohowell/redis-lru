@@ -62,7 +62,7 @@ class RedisLRUTest(unittest.TestCase):
         self.assertEqual(flag, 2)
 
     def test_exclude(self):
-        cache = self.get_cache(exceptions=[20])
+        cache = self.get_cache(exclude_values={20})
 
         flag = 0
 
