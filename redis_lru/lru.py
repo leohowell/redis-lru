@@ -113,12 +113,10 @@ class RedisLRU:
 
     def _decorator_key(self, func: types.FunctionType, *args, **kwargs):
         try:
-            for arg in args:
-                hash(arg)
-            for value in kwargs.values():
-                hash(value)
+            hash_arg = tuple([hash(arg) for arg in args])
+            hash_kwargs = tuple([hash(value) for value in kwargs.values()])
         except TypeError:
             raise ArgsUnhashable()
 
         return '{}:{}:{}{!r}:{!r}'.format(self.key_prefix, func.__module__,
-                                          func.__qualname__, args, kwargs)
+                                          func.__qualname__, hash_arg, hash_kwargs)
