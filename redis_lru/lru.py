@@ -5,6 +5,7 @@
 @date: 2018-12-31
 """
 
+import datetime
 import time
 import types
 import atexit
@@ -25,17 +26,20 @@ class RedisLRU:
                  default_ttl=15 * 60,
                  key_prefix='RedisLRU',
                  clear_on_exit=False,
-                 exclude_values=None):
+                 exclude_values=None,
+                 expire_on=None
+                 ):
         self.client = client
         self.max_size = max_size
         self.key_prefix = key_prefix
         self.default_ttl = default_ttl
         self.exclude_values = exclude_values if type(exclude_values) is set else set()
+        self.expire_on = expire_on
 
         if clear_on_exit:
             atexit.register(self.clear_all_cache)
 
-    def __call__(self, ttl=60 * 15):
+    def __call__(self, ttl=None, expire_on=None):
         func = None
 
         def inner(*args, **kwargs):
@@ -47,8 +51,14 @@ class RedisLRU:
                 try:
                     return self[key]
                 except KeyError:
+                    if expire_on is not None:
+                        _ttl = self._get_ttl_from_expiry_date(expire_on)
+                    elif self.expire_on is not None:
+                        _ttl = self._get_ttl_from_expiry_date(self.expire_on)
+                    else:
+                        _ttl = ttl
                     result = func(*args, **kwargs)
-                    self.set(key, result, ttl)
+                    self.set(key, result, _ttl)
                     return result
 
         # decorator without arguments
@@ -120,3 +130,14 @@ class RedisLRU:
 
         return '{}:{}:{}{!r}:{!r}'.format(self.key_prefix, func.__module__,
                                           func.__qualname__, hash_arg, hash_kwargs)
+
+    def _get_ttl_from_expiry_date(self, expire_on):
+        if expire_on is None:
+            return self.default_ttl
+        else: # calculate the seconds until the datetime <expire_on> is reached
+            now = datetime.datetime.now()
+            return round((datetime.timedelta(hours=24) - (now - now.replace(
+                hour=expire_on.hour,
+                minute=expire_on.minute,
+                second=expire_on.second,
+                microsecond=expire_on.microsecond))).total_seconds() % (24 * 3600))
