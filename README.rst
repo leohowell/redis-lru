@@ -36,3 +36,11 @@ For the most part, you can just use it like this:
     f(3) # This will print "Calling f(3)", will return 3
     f(3) # This will not print anything, but will return 3 (unless 15 minutes have passed between the first and second function call).
 
+Additionally a datetime.time object can be provided to clear the cache at a specific time of the day:
+
+.. code-block:: python
+
+    @cache(expire_on=datetime.time(hour=8)) # clear at 08:00 o'clock
+    def b(x):
+        print("Calling f({})".format(x))
+        return x
