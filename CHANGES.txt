@@ -1,3 +1,7 @@
+0.1.1
+=====
+- Added new `expire_on` parameter for @cache & RedisLRU support set ttl by `datetime.time` objects
+
 0.1.0
 =====
 - Refactor RedisLRU class for a clean and neat implement.
