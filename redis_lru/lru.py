@@ -10,6 +10,7 @@ import time
 import types
 import atexit
 import pickle
+from collections.abc import Hashable
 from functools import wraps
 
 import redis
@@ -86,7 +87,7 @@ class RedisLRU:
             return pickle.loads(result)
 
     def set(self, key, value, ttl=None):
-        if value in self.exclude_values:
+        if isinstance(value, Hashable) and value in self.exclude_values:
             return
         ttl = ttl or self.default_ttl
         value = pickle.dumps(value)
