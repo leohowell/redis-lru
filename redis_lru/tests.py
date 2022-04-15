@@ -37,6 +37,24 @@ class RedisLRUTest(unittest.TestCase):
         self.assertEqual(result2, 20)
         self.assertEqual(flag, 1)
 
+    def test_lru_dict_value(self):
+        cache = self.get_cache()
+        flag = 0
+
+        @cache
+        def foo(x, y=10):
+            nonlocal flag
+            flag += 1
+            return {x: y}
+
+        result1 = foo(10)
+        self.assertEqual(result1, {10: 10})
+        self.assertEqual(flag, 1)
+
+        result2 = foo(10)
+        self.assertEqual(result2, {10: 10})
+        self.assertEqual(flag, 1)
+
     def test_ttl(self):
         cache = self.get_cache()
 
