@@ -1,3 +1,8 @@
+0.1.2
+=====
+- Fixed support of non-hashable values
+
+
 0.1.1
 =====
 - Added new `expire_on` parameter for @cache & RedisLRU support set ttl by `datetime.time` objects
