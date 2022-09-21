@@ -62,12 +62,6 @@ class RedisLRU:
                     self.set(key, result, _ttl)
                     return result
 
-        # decorator without arguments
-        if callable(ttl):
-            func = ttl
-            ttl = 60 * 15
-            return wraps(func)(inner)
-
         # decorator with arguments
         def wrapper(f):
             nonlocal func
